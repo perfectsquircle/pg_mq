@@ -93,6 +93,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION f_channel_revive()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO message_delivery (message_id, channel_name)
+  SELECT q.message_id, NEW.channel_name FROM "queue" q
+  LEFT JOIN message_delivery md ON md.message_id = q.message_id
+  WHERE md IS NULL
+  LIMIT NEW.prefetch;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- TRIGGERS
 
 CREATE TRIGGER t_enqueue_after_insert
@@ -110,3 +122,7 @@ AFTER INSERT ON "message_delivery"
 CREATE TRIGGER t_enqueue_next_after_delete
 AFTER DELETE ON "queue"
    FOR EACH ROW EXECUTE PROCEDURE f_enqueue_next_message_in_sequence();
+   
+CREATE TRIGGER t_channel_revive_after_insert
+AFTER INSERT ON "channel"
+   FOR EACH ROW EXECUTE PROCEDURE f_channel_revive();
