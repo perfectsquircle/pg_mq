@@ -1,5 +1,8 @@
 create extension if not exists hstore;
 
+create schema mq;
+SET search_path TO mq,public;
+
 -- TABLES 
 create table "message" (
     message_id bigserial primary key,
