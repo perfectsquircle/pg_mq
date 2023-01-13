@@ -20,14 +20,16 @@ create table queue (
     sequence_key text not null unique
 );
 
-create table channels (
+create table channel (
     channel_id bigserial primary key,
-    channel_name text not null unique
+    channel_name text not null unique,
+    prefetch int not null default 3
 );
 
-insert into channels(channel_name)
-values 
-('default');
+create table message_delivery (
+    message_id bigint not null references "message"(message_id) on delete cascade,
+    channel_name text not null references channel(channel_name) on delete cascade
+);
 
 -- FUNCTIONS
 
@@ -37,20 +39,42 @@ BEGIN
   INSERT INTO queue (message_id, sequence_key)
   VALUES (NEW.message_id, NEW.sequence_key)
   ON CONFLICT DO NOTHING;
-  RETURN NULL;
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION f_dequeue()
 RETURNS TRIGGER AS $$
 DECLARE
-  channel TEXT;
+  selected_channel TEXT;
+BEGIN
+  select c.channel_name into selected_channel 
+      from channel c
+      left join message_delivery md on c.channel_name = md.channel_name
+      group by c.channel_name, c.prefetch
+      having count(md) < c.prefetch
+      order by random() 
+      limit 1;
+  RAISE NOTICE 'Selected channel: %', selected_channel;
+  if selected_channel is null then
+    return null;
+  end if;
+  INSERT INTO message_delivery (message_id, channel_name)
+  VALUES (NEW.message_id, selected_channel)
+  ON CONFLICT DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION f_deliver_message()
+RETURNS TRIGGER AS $$
+DECLARE
   payload TEXT;
 BEGIN
-  select channel_name into channel from channels order by random() limit 1;
   select row_to_json(m) into payload from message m where message_id = NEW.message_id;
-  PERFORM pg_notify(channel, payload);
-  return null;
+  PERFORM pg_notify(NEW.channel_name, payload);
+  RAISE NOTICE 'Sent to channel: %', NEW.channel_name;
+  return NEW;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -78,6 +102,10 @@ AFTER INSERT ON "message"
 CREATE TRIGGER t_dequeue_after_insert
 AFTER INSERT ON "queue"
    FOR EACH ROW EXECUTE PROCEDURE f_dequeue();
+
+CREATE TRIGGER t_deliver_message_after_insert
+AFTER INSERT ON "message_delivery"
+   FOR EACH ROW EXECUTE PROCEDURE f_deliver_message();
 
 CREATE TRIGGER t_enqueue_next_after_delete
 AFTER DELETE ON "queue"
