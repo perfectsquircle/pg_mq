@@ -13,7 +13,7 @@
 
 1. Create a database
 2. Execute [./schema.sql]
-3. Create a listener. See [./listen.sql] and [./consumer.py] for examples.
+3. Create a listener. See [consumer.sql](./examples/consumer.sql) and [consumer.py](./examples/consumer.py) for examples.
 4. ...
 
 
