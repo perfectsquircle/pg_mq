@@ -18,6 +18,11 @@ create index on message(enqueue_time);
 create index on message(status);
 create index on message(status) where status = 0;
 
+create table message_complete (
+    complete_time timestamptz not null default now(),
+    success bool not null
+) inherits ("message");
+
 create table queue (
     message_id bigint not null references "message"(message_id) on delete cascade,
     sequence_key text not null unique
@@ -30,8 +35,10 @@ create table channel (
 );
 
 create table message_delivery (
+    delivery_id bigserial primary key,
     message_id bigint not null references "message"(message_id) on delete cascade,
-    channel_name text not null references channel(channel_name) on delete cascade
+    channel_name text not null references channel(channel_name) on delete cascade,
+    delivery_time timestamptz not null default now()
 );
 
 -- FUNCTIONS
@@ -39,7 +46,7 @@ create table message_delivery (
 CREATE OR REPLACE FUNCTION f_enqueue()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO queue (message_id, sequence_key)
+  INSERT INTO mq.queue (message_id, sequence_key)
   VALUES (NEW.message_id, NEW.sequence_key)
   ON CONFLICT DO NOTHING;
   RETURN NEW;
@@ -52,8 +59,8 @@ DECLARE
   selected_channel TEXT;
 BEGIN
   select c.channel_name into selected_channel 
-      from channel c
-      left join message_delivery md on c.channel_name = md.channel_name
+      from mq.channel c
+      left join mq.message_delivery md on c.channel_name = md.channel_name
       group by c.channel_name, c.prefetch
       having count(md) < c.prefetch
       order by random() 
@@ -62,9 +69,9 @@ BEGIN
   if selected_channel is null then
     return null;
   end if;
-  INSERT INTO message_delivery (message_id, channel_name)
-  VALUES (NEW.message_id, selected_channel)
-  ON CONFLICT DO NOTHING;
+  INSERT INTO mq.message_delivery (message_id, channel_name)
+    VALUES (NEW.message_id, selected_channel)
+    ON CONFLICT DO NOTHING;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -74,7 +81,9 @@ RETURNS TRIGGER AS $$
 DECLARE
   payload TEXT;
 BEGIN
-  select row_to_json(m) into payload from message m where message_id = NEW.message_id;
+  select row_to_json(m) into payload 
+    from (select m.*, NEW.delivery_id FROM mq.message m 
+          where m.message_id = NEW.message_id) m;
   PERFORM pg_notify(NEW.channel_name, payload);
   RAISE NOTICE 'Sent to channel: %', NEW.channel_name;
   return NEW;
@@ -84,9 +93,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION f_enqueue_next_message_in_sequence()
 RETURNS TRIGGER AS $$
 BEGIN
-    insert into queue (
+    insert into mq.queue (
         select message_id, sequence_key
-        from "message"
+        from mq.message"
         where sequence_key = OLD.sequence_key
         and message_id > OLD.message_id
         order by message_id
@@ -99,11 +108,11 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION f_channel_revive()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO message_delivery (message_id, channel_name)
-  SELECT q.message_id, NEW.channel_name FROM "queue" q
-  LEFT JOIN message_delivery md ON md.message_id = q.message_id
-  WHERE md IS NULL
-  LIMIT NEW.prefetch;
+  INSERT INTO mq.message_delivery (message_id, channel_name)
+  SELECT q.message_id, NEW.channel_name FROM mq.queue q
+    LEFT JOIN mq.message_delivery md ON md.message_id = q.message_id
+    WHERE md IS NULL
+    LIMIT NEW.prefetch;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -119,7 +128,7 @@ AFTER INSERT ON "queue"
    FOR EACH ROW EXECUTE PROCEDURE f_dequeue();
 
 CREATE TRIGGER t_deliver_message_after_insert
-AFTER INSERT ON "message_delivery"
+AFTER INSERT ON message_delivery
    FOR EACH ROW EXECUTE PROCEDURE f_deliver_message();
 
 CREATE TRIGGER t_enqueue_next_after_delete
