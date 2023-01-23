@@ -12,7 +12,7 @@ def db_listen():
     with psycopg2.connect(dbname='queue_baby', user='cfurano', host='localhost', port=5432, password='') as connection:
         with connection.cursor() as cur:
             cur.execute(
-                'INSERT INTO mq.channel(channel_name) VALUES (MD5(text(pg_backend_pid()))) RETURNING channel_name;')
+                'SELECT mq.register_channel()')
             channel_name_row = cur.fetchone()
             cur.execute('LISTEN "' + channel_name_row[0] + '";')
             connection.commit()
