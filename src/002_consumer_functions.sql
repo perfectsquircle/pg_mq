@@ -1,7 +1,15 @@
 SET search_path TO mq,public;
 
-DROP FUNCTION IF EXISTS mq.ack;
-DROP FUNCTION IF EXISTS mq.nack;
+-- DROP FUNCTION IF EXISTS mq.ack;
+-- DROP FUNCTION IF EXISTS mq.nack;
+
+/* REGISTER */
+
+CREATE OR REPLACE FUNCTION mq.register_channel () 
+RETURNS text AS $$
+  INSERT INTO mq.channel(channel_name) VALUES (MD5(text(pg_backend_pid()))) RETURNING channel_name;
+$$ LANGUAGE sql;
+
 
 /* ACK */ 
 CREATE OR REPLACE FUNCTION mq.ack (ack_delivery_id BIGINT) 

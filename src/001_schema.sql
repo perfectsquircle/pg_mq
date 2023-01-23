@@ -36,9 +36,10 @@ create table channel (
 
 create table message_delivery (
     delivery_id bigserial primary key,
-    message_id bigint not null references "message"(message_id) on delete cascade,
+    slot_number int not null,
     channel_name text not null references channel(channel_name) on delete cascade,
-    delivery_time timestamptz not null default now()
+    message_id bigint references "message"(message_id) on delete cascade,
+    delivery_time timestamptz
 );
 
 -- FUNCTIONS
@@ -53,34 +54,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION f_dequeue()
-RETURNS TRIGGER AS $$
-DECLARE
-  selected_channel TEXT;
-BEGIN
-  select c.channel_name into selected_channel 
-      from mq.channel c
-      left join mq.message_delivery md on c.channel_name = md.channel_name
-      group by c.channel_name, c.prefetch
-      having count(md) < c.prefetch
-      order by random() 
-      limit 1;
-  RAISE NOTICE 'Selected channel: %', selected_channel;
-  if selected_channel is null then
-    return null;
-  end if;
-  INSERT INTO mq.message_delivery (message_id, channel_name)
-    VALUES (NEW.message_id, selected_channel)
-    ON CONFLICT DO NOTHING;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION f_deliver_message()
 RETURNS TRIGGER AS $$
 DECLARE
   payload TEXT;
 BEGIN
+  IF NEW.message_id IS null THEN
+    RETURN NEW;
+  END IF;
   select row_to_json(m) into payload 
     from (select m.*, NEW.delivery_id FROM mq.message m 
           where m.message_id = NEW.message_id) m;
@@ -90,12 +72,58 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION f_new_delivery()
+RETURNS TRIGGER AS $$
+DECLARE
+  payload TEXT;
+BEGIN
+  INSERT INTO mq.message_delivery(channel_name, slot_number)
+  VALUES (OLD.channel_name, OLD.slot_number);
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION take_ready_message()
+RETURNS bigint AS $$
+  DELETE FROM mq.queue 
+  WHERE message_id = (
+    SELECT message_id FROM mq.queue
+    ORDER BY message_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+  ) RETURNING message_id;
+$$ LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION f_match_message()
+RETURNS TRIGGER AS $$
+DECLARE
+  selected_message_id bigint;
+  payload text;
+BEGIN
+  SELECT mq.take_ready_message() INTO selected_message_id;
+  IF selected_message_id IS NULL THEN 
+    RETURN NEW;
+  END IF;
+
+  NEW.message_id := selected_message_id;
+  NEW.delivery_time := now();
+
+  select row_to_json(m) into payload 
+    from (select m.*, NEW.delivery_id FROM mq.message m 
+          where m.message_id = selected_message_id) m;
+  PERFORM pg_notify(NEW.channel_name, payload);
+  RAISE NOTICE 'Sent to channel: %', NEW.channel_name;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION f_enqueue_next_message_in_sequence()
 RETURNS TRIGGER AS $$
 BEGIN
     insert into mq.queue (
         select message_id, sequence_key
-        from mq.message"
+        from mq.message
         where sequence_key = OLD.sequence_key
         and message_id > OLD.message_id
         order by message_id
@@ -108,12 +136,39 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION f_channel_revive()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO mq.message_delivery (message_id, channel_name)
-  SELECT q.message_id, NEW.channel_name FROM mq.queue q
-    LEFT JOIN mq.message_delivery md ON md.message_id = q.message_id
-    WHERE md IS NULL
-    LIMIT NEW.prefetch;
+  INSERT INTO mq.message_delivery (channel_name, slot_number)
+    SELECT NEW.channel_name, generate_series(1,NEW.prefetch);
   RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- CREATE OR REPLACE FUNCTION f_dequeue()
+-- RETURNS TRIGGER AS $$
+-- DECLARE
+--   selected_channel int;
+-- BEGIN
+--   SELECT find_open_channel() INTO selected_channel;
+--   RAISE NOTICE 'Selected channel: %', selected_channel;
+--   if selected_channel is null then
+--     return null;
+--   end if;
+--   INSERT INTO mq.message_delivery (message_id, channel_name)
+--     VALUES (NEW.message_id, selected_channel)
+--     ON CONFLICT DO NOTHING;
+--   RETURN NEW;
+-- END;
+-- $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION find_open_slot()
+RETURNS bigint AS $$
+DECLARE
+  selected_channel int;
+BEGIN
+  SELECT channel_id INTO selected_channel
+  FROM mq.message_delivery
+  WHERE mq.message_id is null
+  FOR UPDATE SKIP LOCKED;
+  RETURN selected_channel;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -123,13 +178,21 @@ CREATE TRIGGER t_enqueue_after_insert
 AFTER INSERT ON "message"
    FOR EACH ROW EXECUTE PROCEDURE f_enqueue();
 
-CREATE TRIGGER t_dequeue_after_insert
-AFTER INSERT ON "queue"
-   FOR EACH ROW EXECUTE PROCEDURE f_dequeue();
+-- CREATE TRIGGER t_dequeue_after_insert
+-- AFTER INSERT ON "queue"
+--    FOR EACH ROW EXECUTE PROCEDURE f_dequeue();
 
-CREATE TRIGGER t_deliver_message_after_insert
-AFTER INSERT ON message_delivery
+CREATE TRIGGER t_deliver_message_after_update
+AFTER UPDATE ON message_delivery
    FOR EACH ROW EXECUTE PROCEDURE f_deliver_message();
+
+CREATE TRIGGER t_new_delivery_after_delete
+AFTER DELETE ON message_delivery
+   FOR EACH ROW EXECUTE PROCEDURE f_new_delivery();
+
+CREATE TRIGGER t_match_message_before_insert
+BEFORE INSERT ON message_delivery
+   FOR EACH ROW EXECUTE PROCEDURE f_match_message();
 
 CREATE TRIGGER t_enqueue_next_after_delete
 AFTER DELETE ON "queue"
