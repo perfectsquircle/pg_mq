@@ -1,9 +1,25 @@
 /* REGISTER */
 
-CREATE OR REPLACE FUNCTION mq.register_channel () 
+CREATE OR REPLACE FUNCTION mq.register_channel() 
 RETURNS text AS $$
-  INSERT INTO mq.channel(channel_name) VALUES (text(pg_backend_pid())) RETURNING channel_id;
-$$ LANGUAGE sql;
+DECLARE 
+  new_channel_id bigint;
+BEGIN
+  INSERT INTO mq.channel(channel_name) VALUES (text(pg_backend_pid())) RETURNING channel_id INTO new_channel_id;
+  EXECUTE format('LISTEN "%s"', new_channel_id);
+  RETURN new_channel_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION mq.unregister_channel(the_channel_id bigint) 
+RETURNS void AS $$
+BEGIN
+  EXECUTE format('UNLISTEN "%s"', the_channel_id);
+  INSERT INTO mq.message_waiting (SELECT message_id FROM mq.message_delivered WHERE channel_id = the_channel_id);
+  DELETE FROM mq.channel WHERE channel_id = the_channel_id;
+  RETURN;
+END;
+$$ LANGUAGE plpgsql;
 
 
 /* ACK */ 

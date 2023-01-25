@@ -1,16 +1,14 @@
-BEGIN:
-
-INSERT INTO mq.channel(channel_name) VALUES (MD5(text(pg_backend_pid())))
-    RETURNING channel_id;
-LISTEN "1";
-
-COMMIT;
-
+-- REGISTER
 BEGIN;
-
-SELECT mq.ack(1, true);
-
+SELECT mq.register_channel();
 COMMIT;
 
---UNLISTEN "1";
---DELETE from channel;
+-- ACKNOWLEDGE
+BEGIN;
+SELECT mq.ack(1, true);
+COMMIT;
+
+-- UNREGISTER
+BEGIN;
+SELECT mq.unregister_channel(1);
+COMMIT;
