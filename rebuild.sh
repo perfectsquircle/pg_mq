@@ -1,6 +1,9 @@
 #!/bin/bash -e
+set -e
 
-psql -c "drop database queue_baby;"
-psql -c "create database queue_baby;"
-psql -f src/001_schema.sql -d queue_baby
-psql -f src/002_consumer_functions.sql -d queue_baby
+# psql -c "drop database pg_mq_poc;"
+# psql -c "create database pg_mq_poc;"
+
+for f in ./src/*.sql; do
+    psql -f "$f" -d pg_mq_poc #--single-transaction
+done

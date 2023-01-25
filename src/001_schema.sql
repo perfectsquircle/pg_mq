@@ -1,140 +1,174 @@
 create extension if not exists hstore;
 
+drop schema if exists mq cascade;
 create schema mq;
-SET search_path TO mq,public;
 
 -- TABLES 
-create table "message" (
+create table mq.message (
     message_id bigserial primary key,
-    sequence_key text,
-    "key" text not null,
+    routing_key text not null,
     payload jsonb not null,
     headers hstore not null default '',
-    enqueue_time timestamptz not null default now(),
-    status smallint not null default 0
+    publish_time timestamptz not null default now()
 );
-create index on message(sequence_key);
-create index on message(enqueue_time);
-create index on message(status);
-create index on message(status) where status = 0;
+create index on mq.message(publish_time);
 
-create table message_complete (
-    complete_time timestamptz not null default now(),
-    success bool not null
-) inherits ("message");
-
-create table queue (
-    message_id bigint not null references "message"(message_id) on delete cascade,
-    sequence_key text not null unique
+create table mq.message_waiting (
+    message_id bigint primary key references mq.message(message_id) on delete cascade,
+    enqueue_time timestamptz not null default now()
 );
 
-create table channel (
+create table mq.channel (
     channel_id bigserial primary key,
     channel_name text not null unique,
-    prefetch int not null default 3
+    maximum_messages int not null default 3
 );
 
-create table message_delivery (
+create table mq.channel_waiting (
+    channel_id bigint not null references mq.channel(channel_id) on delete cascade,
+    enqueue_time timestamptz not null default now()
+);
+
+create table mq.message_delivered (
     delivery_id bigserial primary key,
-    message_id bigint not null references "message"(message_id) on delete cascade,
-    channel_name text not null references channel(channel_name) on delete cascade,
+    message_id bigint not null references mq.message(message_id) on delete cascade,
+    channel_id bigint not null references mq.channel(channel_id) on delete cascade,
     delivery_time timestamptz not null default now()
+);
+
+create table mq.message_complete (
+    like mq.message,
+    complete_time timestamptz not null default now(),
+    success bool not null
 );
 
 -- FUNCTIONS
 
-CREATE OR REPLACE FUNCTION f_enqueue()
+CREATE OR REPLACE FUNCTION mq.notify_channel(delivery_id bigint, the_message_id bigint, channel_name text)
+RETURNS VOID AS $$
+DECLARE
+  payload TEXT;
+BEGIN
+  select row_to_json(md) into payload 
+    from (select delivery_id, m.* 
+      from mq.message m
+      where m.message_id = the_message_id) md;
+  PERFORM pg_notify(channel_name, payload);
+  RAISE NOTICE 'Sent to channel: %', channel_name;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION mq.take_waiting_message()
+RETURNS bigint AS $$
+  DELETE FROM mq.message_waiting 
+  WHERE message_id = (
+    SELECT message_id FROM mq.message_waiting
+    ORDER BY message_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+  ) RETURNING message_id;
+$$ LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION mq.take_waiting_channel()
+RETURNS bigint AS $$
+  DELETE FROM mq.channel_waiting 
+  WHERE channel_id = (
+    SELECT channel_id FROM mq.channel_waiting
+    ORDER BY random()
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+  ) RETURNING channel_id;
+$$ LANGUAGE SQL;
+
+
+-- TRIGGERS
+
+-- ENQUEUE
+
+CREATE OR REPLACE FUNCTION mq.enqueue()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO mq.queue (message_id, sequence_key)
-  VALUES (NEW.message_id, NEW.sequence_key)
+  INSERT INTO mq.message_waiting(message_id)
+  VALUES (NEW.message_id)
   ON CONFLICT DO NOTHING;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION f_dequeue()
+CREATE TRIGGER enqueue_after_insert
+AFTER INSERT ON mq.message
+   FOR EACH ROW EXECUTE PROCEDURE mq.enqueue();
+
+-- DELIVER MESSAGE
+
+CREATE OR REPLACE FUNCTION mq.deliver_message()
 RETURNS TRIGGER AS $$
-DECLARE
-  selected_channel TEXT;
 BEGIN
-  select c.channel_name into selected_channel 
-      from mq.channel c
-      left join mq.message_delivery md on c.channel_name = md.channel_name
-      group by c.channel_name, c.prefetch
-      having count(md) < c.prefetch
-      order by random() 
-      limit 1;
-  RAISE NOTICE 'Selected channel: %', selected_channel;
-  if selected_channel is null then
-    return null;
-  end if;
-  INSERT INTO mq.message_delivery (message_id, channel_name)
-    VALUES (NEW.message_id, selected_channel)
-    ON CONFLICT DO NOTHING;
+  EXECUTE mq.notify_channel(NEW.delivery_id, NEW.message_id, text(NEW.channel_id));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION f_deliver_message()
-RETURNS TRIGGER AS $$
-DECLARE
-  payload TEXT;
-BEGIN
-  select row_to_json(m) into payload 
-    from (select m.*, NEW.delivery_id FROM mq.message m 
-          where m.message_id = NEW.message_id) m;
-  PERFORM pg_notify(NEW.channel_name, payload);
-  RAISE NOTICE 'Sent to channel: %', NEW.channel_name;
-  return NEW;
-END;
-$$ LANGUAGE plpgsql;
+CREATE TRIGGER deliver_message_after_insert
+BEFORE INSERT ON mq.message_delivered
+   FOR EACH ROW EXECUTE PROCEDURE mq.deliver_message();
 
-CREATE OR REPLACE FUNCTION f_enqueue_next_message_in_sequence()
-RETURNS TRIGGER AS $$
-BEGIN
-    insert into mq.queue (
-        select message_id, sequence_key
-        from mq.message"
-        where sequence_key = OLD.sequence_key
-        and message_id > OLD.message_id
-        order by message_id
-        limit 1
-    ) ON CONFLICT DO NOTHING;
-    RETURN null;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION f_channel_revive()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO mq.message_delivery (message_id, channel_name)
-  SELECT q.message_id, NEW.channel_name FROM mq.queue q
-    LEFT JOIN mq.message_delivery md ON md.message_id = q.message_id
-    WHERE md IS NULL
-    LIMIT NEW.prefetch;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- TRIGGERS
-
-CREATE TRIGGER t_enqueue_after_insert
-AFTER INSERT ON "message"
-   FOR EACH ROW EXECUTE PROCEDURE f_enqueue();
-
-CREATE TRIGGER t_dequeue_after_insert
-AFTER INSERT ON "queue"
-   FOR EACH ROW EXECUTE PROCEDURE f_dequeue();
-
-CREATE TRIGGER t_deliver_message_after_insert
-AFTER INSERT ON message_delivery
-   FOR EACH ROW EXECUTE PROCEDURE f_deliver_message();
-
-CREATE TRIGGER t_enqueue_next_after_delete
-AFTER DELETE ON "queue"
-   FOR EACH ROW EXECUTE PROCEDURE f_enqueue_next_message_in_sequence();
+-- CHANNEL INITIALIZE
    
-CREATE TRIGGER t_channel_revive_after_insert
-AFTER INSERT ON "channel"
-   FOR EACH ROW EXECUTE PROCEDURE f_channel_revive();
+CREATE OR REPLACE FUNCTION mq.channel_initialize()
+RETURNS TRIGGER AS $$
+DECLARE
+  selected_message_id bigint;
+BEGIN
+  FOR i IN 1..NEW.maximum_messages LOOP
+    INSERT INTO mq.channel_waiting(channel_id)
+      VALUES (NEW.channel_id);
+  END LOOP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER channel_initialize_after_insert
+AFTER INSERT ON mq.channel
+   FOR EACH ROW EXECUTE PROCEDURE mq.channel_initialize();
+
+
+-- MATCH MESSAGE
+
+CREATE OR REPLACE FUNCTION mq.match_message()
+RETURNS TRIGGER AS $$
+DECLARE
+  selected_message_id bigint;
+BEGIN
+  SELECT mq.take_waiting_message() INTO selected_message_id;
+  IF selected_message_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  INSERT INTO mq.message_delivered(message_id, channel_id)
+      VALUES (selected_message_id, NEW.channel_id);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER match_message_before_insert
+BEFORE INSERT ON mq.channel_waiting
+  FOR EACH ROW EXECUTE PROCEDURE mq.match_message();
+
+CREATE OR REPLACE FUNCTION mq.match_channel()
+RETURNS TRIGGER AS $$
+DECLARE
+  selected_channel_id bigint;
+BEGIN
+  SELECT mq.take_waiting_channel() INTO selected_channel_id;
+  IF selected_channel_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  INSERT INTO mq.message_delivered(message_id, channel_id)
+      VALUES (NEW.message_id, selected_channel_id);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER match_channel_before_insert
+BEFORE INSERT ON mq.message_waiting
+  FOR EACH ROW EXECUTE PROCEDURE mq.match_channel();

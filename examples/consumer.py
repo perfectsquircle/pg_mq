@@ -9,12 +9,13 @@ import json
 
 
 def db_listen():
-    with psycopg2.connect(dbname='queue_baby', user='cfurano', host='localhost', port=5432, password='') as connection:
+    with psycopg2.connect(dbname='pg_mq_poc', user='cfurano', host='localhost', port=5432, password='') as connection:
         with connection.cursor() as cur:
             cur.execute(
-                'INSERT INTO mq.channel(channel_name) VALUES (MD5(text(pg_backend_pid()))) RETURNING channel_name;')
+                'SELECT mq.register_channel()')
             channel_name_row = cur.fetchone()
-            cur.execute('LISTEN "' + channel_name_row[0] + '";')
+            print(f"Listening to channel {channel_name_row[0]}")
+            cur.execute(f'LISTEN "{channel_name_row[0]}";')
             connection.commit()
             while True:
                 select.select([connection], [], [], 1)
@@ -26,7 +27,7 @@ def db_listen():
                     print(f"message: {delivered_message}")
                     time.sleep(0.25)
                     cur.execute(
-                        f"SELECT mq.ack({delivered_message['delivery_id']})")
+                        f"SELECT mq.ack({delivered_message['delivery_id']}, true)")
                     connection.commit()
                     print('message acked.')
 
