@@ -25,7 +25,7 @@ create table mq.channel (
 );
 
 create table mq.channel_waiting (
-    channel_id bigint primary key references mq.channel(channel_id) on delete cascade,
+    channel_id bigint not null references mq.channel(channel_id) on delete cascade,
     enqueue_time timestamptz not null default now()
 );
 
@@ -43,13 +43,15 @@ create table mq.message_complete (
 
 -- FUNCTIONS
 
-CREATE OR REPLACE FUNCTION mq.notify_channel(the_message_id bigint, channel_name text)
+CREATE OR REPLACE FUNCTION mq.notify_channel(delivery_id bigint, the_message_id bigint, channel_name text)
 RETURNS VOID AS $$
 DECLARE
   payload TEXT;
 BEGIN
-  select row_to_json(m) into payload from mq.message m 
-          where m.message_id = the_message_id;
+  select row_to_json(md) into payload 
+    from (select delivery_id, m.* 
+      from mq.message m
+      where m.message_id = the_message_id) md;
   PERFORM pg_notify(channel_name, payload);
   RAISE NOTICE 'Sent to channel: %', channel_name;
 END;
@@ -101,7 +103,7 @@ AFTER INSERT ON mq.message
 CREATE OR REPLACE FUNCTION mq.deliver_message()
 RETURNS TRIGGER AS $$
 BEGIN
-  EXECUTE mq.notify_channel(NEW.message_id, text(NEW.channel_id));
+  EXECUTE mq.notify_channel(NEW.delivery_id, NEW.message_id, text(NEW.channel_id));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

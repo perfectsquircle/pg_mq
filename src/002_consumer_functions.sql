@@ -2,7 +2,7 @@
 
 CREATE OR REPLACE FUNCTION mq.register_channel () 
 RETURNS text AS $$
-  INSERT INTO mq.channel(channel_name) VALUES (text(pg_backend_pid())) RETURNING channel_name;
+  INSERT INTO mq.channel(channel_name) VALUES (text(pg_backend_pid())) RETURNING channel_id;
 $$ LANGUAGE sql;
 
 
