@@ -37,9 +37,10 @@ create table mq.message_delivered (
 );
 
 create table mq.message_complete (
+    like mq.message,
     complete_time timestamptz not null default now(),
     success bool not null
-) inherits (mq.message);
+);
 
 -- FUNCTIONS
 
@@ -70,7 +71,7 @@ $$ LANGUAGE SQL;
 
 CREATE OR REPLACE FUNCTION mq.take_waiting_channel()
 RETURNS bigint AS $$
-  DELETE FROM mq.channel 
+  DELETE FROM mq.channel_waiting 
   WHERE channel_id = (
     SELECT channel_id FROM mq.channel_waiting
     ORDER BY random()
@@ -152,3 +153,22 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER match_message_before_insert
 BEFORE INSERT ON mq.channel_waiting
   FOR EACH ROW EXECUTE PROCEDURE mq.match_message();
+
+CREATE OR REPLACE FUNCTION mq.match_channel()
+RETURNS TRIGGER AS $$
+DECLARE
+  selected_channel_id bigint;
+BEGIN
+  SELECT mq.take_waiting_channel() INTO selected_channel_id;
+  IF selected_channel_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  INSERT INTO mq.message_delivered(message_id, channel_id)
+      VALUES (NEW.message_id, selected_channel_id);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER match_channel_before_insert
+BEFORE INSERT ON mq.message_waiting
+  FOR EACH ROW EXECUTE PROCEDURE mq.match_channel();
