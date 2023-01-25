@@ -41,3 +41,21 @@ END;
 $$ LANGUAGE plpgsql;
 
 /* TODO: NACK with future retry */
+
+CREATE OR REPLACE FUNCTION mq.retry(the_delivery_id BIGINT, retry_after interval) 
+RETURNS void AS $$
+DECLARE
+  delivery RECORD;
+BEGIN
+  SELECT * INTO delivery  
+    FROM mq.message_delivered md WHERE md.delivery_id = the_delivery_id;
+  IF delivery IS NULL THEN
+    RAISE WARNING 'No such delivery';
+    RETURN;
+  END IF;
+  DELETE FROM mq.message_delivered m WHERE m.delivery_id = the_delivery_id;
+  INSERT INTO mq.message_waiting (message_id, not_until)
+    VALUES (delivery.message_id, now() + retry_after);
+  INSERT INTO mq.channel_waiting(channel_id) VALUES (delivery.channel_id);
+END;
+$$ LANGUAGE plpgsql;

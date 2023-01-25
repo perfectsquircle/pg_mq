@@ -15,7 +15,8 @@ create index on mq.message(publish_time);
 
 create table mq.message_waiting (
     message_id bigint primary key references mq.message(message_id) on delete cascade,
-    enqueue_time timestamptz not null default now()
+    enqueue_time timestamptz not null default now(),
+    not_until timestamptz null
 );
 
 create table mq.channel (
@@ -63,6 +64,7 @@ RETURNS bigint AS $$
   DELETE FROM mq.message_waiting 
   WHERE message_id = (
     SELECT message_id FROM mq.message_waiting
+    WHERE not_until IS NULL OR not_until < now()
     ORDER BY message_id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
