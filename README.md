@@ -26,7 +26,7 @@
 Create a new exchange to publish messages to.
 
 ```sql
-INSERT INTO mq.exchange(exchange_name) VALUES ('My Exchange');
+CALL mq.create_exchange('My Exchange');
 ```
 
 ### Create a queue
@@ -34,9 +34,7 @@ INSERT INTO mq.exchange(exchange_name) VALUES ('My Exchange');
 Queues belong to an exchange. They must define a routing pattern to receive messages. The routing pattern is a regular expression which is executed against all incoming routing keys.
 
 ```sql
-INSERT INTO mq.queue(exchange_id, queue_name, routing_pattern)
-VALUES
-((SELECT exchange_id FROM mq.exchange WHERE exchange_name = 'My Exchange'), 'My Queue', '^my-key$');
+CALL mq.create_queue('My Exchange', 'My Queue', '^data-\d+$');
 ```
 
 ### Publish a message
@@ -44,7 +42,7 @@ VALUES
 Messages are comprised of a routing key, a JSON payload, and headers. They can be published to an exchange.
 
 ```sql
-SELECT mq.publish('My Exchange', 'my-key', '{ "hello": "world" }', 'foo=>bar');
+CALL mq.publish('My Exchange', 'my-key', '{ "hello": "world" }', 'foo=>bar');
 ```
 
 ### Consume a message
@@ -52,7 +50,7 @@ SELECT mq.publish('My Exchange', 'my-key', '{ "hello": "world" }', 'foo=>bar');
 A consumer can listen to a queue. It will receive all messages in the queue if it's the sole consumer. It will receive some fraction of messages in the queue if there are multiple consumers.
 
 ```sql
-SELECT mq.open_channel('My Queue');
+CALL mq.open_channel('My Queue');
 ```
 
 ### Acknowledge a message
@@ -60,7 +58,7 @@ SELECT mq.open_channel('My Queue');
 A consumer can acknowledge a message using the `delivery_id`. An acknowledged message is removed from the queue and discarded.
 
 ```sql
-SELECT mq.ack(delivery_id);
+CALL mq.ack(delivery_id);
 ```
 
 ## Installation

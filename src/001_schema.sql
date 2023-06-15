@@ -72,7 +72,7 @@ create table mq.message_complete (
 
 -- FUNCTIONS
 
-CREATE OR REPLACE FUNCTION mq.notify_channel(delivery_id bigint, the_message_id bigint, channel_name text)
+CREATE OR REPLACE FUNCTION mq.notify_channel(delivery_id bigint, message_id bigint, channel_name text)
 RETURNS VOID AS $$
 DECLARE
   payload TEXT;
@@ -80,9 +80,9 @@ BEGIN
   select row_to_json(md) into payload 
     from (select delivery_id, m.routing_key, m.payload, m.headers
       from mq.message m
-      where m.message_id = the_message_id) md;
+      where m.message_id = notify_channel.message_id) md;
   PERFORM pg_notify(channel_name, payload);
-  RAISE NOTICE 'Sent message % to channel %', the_message_id, channel_name;
+  RAISE NOTICE 'Sent message % to channel %', notify_channel.message_id, channel_name;
 END;
 $$ LANGUAGE plpgsql;
 
