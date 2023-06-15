@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using Npgsql;
 
@@ -8,8 +9,6 @@ public sealed class EventingConsumer : IDisposable
     public event MessageHandler OnMessageReceived;
     private readonly NpgsqlDataSource dataSource;
     private NpgsqlConnection listeningConnection;
-    private volatile string channelId;
-
     public EventingConsumer(string connectionString)
     {
         this.dataSource = NpgsqlDataSource.Create(connectionString);
@@ -17,7 +16,7 @@ public sealed class EventingConsumer : IDisposable
 
     public void OpenChannel(string queueName)
     {
-        if (channelId is not null) 
+        if (listeningConnection is not null)
         {
             return;
         }
@@ -32,11 +31,12 @@ public sealed class EventingConsumer : IDisposable
             Task.Run(() => OnMessageReceived?.Invoke(message, () => Ack(message.DeliveryId)));
         };
 
-        using var openChannelCommand = new NpgsqlCommand("SELECT mq.open_channel($1)", listeningConnection, transaction)
+        using var openChannelCommand = new NpgsqlCommand("mq.open_channel", listeningConnection, transaction)
         {
+            CommandType = CommandType.StoredProcedure,
             Parameters = { new() { Value = queueName } }
         };
-        channelId = (string)openChannelCommand.ExecuteScalar();
+        openChannelCommand.ExecuteNonQuery();
         transaction.Commit();
     }
 
@@ -47,21 +47,20 @@ public sealed class EventingConsumer : IDisposable
 
     public void Ack(long deliveryId)
     {
-        using var cmd = dataSource.CreateCommand($"SELECT mq.ack({deliveryId}, true)");
+        using var cmd = dataSource.CreateCommand("mq.ack");
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.Parameters.Add(new NpgsqlParameter { Value = deliveryId });
         cmd.ExecuteNonQuery();
     }
 
     public void CloseChannel()
     {
-        if (channelId is null)
+        Console.WriteLine($"Closing channel");
+        using var closeChannelCommand = new NpgsqlCommand("mq.close_channel", listeningConnection)
         {
-            return;
-        }
-
-        Console.WriteLine($"Closing channel {channelId}");
-        using var unregisterChannel = dataSource.CreateCommand($"SELECT mq.close_channel({channelId});");
-        unregisterChannel.ExecuteNonQuery();
-        channelId = null;
+            CommandType = CommandType.StoredProcedure,
+        };
+        closeChannelCommand.ExecuteNonQuery();
         listeningConnection?.Dispose();
         listeningConnection = null;
     }
