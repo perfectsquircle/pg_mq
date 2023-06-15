@@ -1,14 +1,8 @@
--- REGISTER
-BEGIN;
-SELECT mq.register_channel();
-COMMIT;
+-- OPEN
+SELECT mq.open_channel('Default Queue');
 
 -- ACKNOWLEDGE
-BEGIN;
 SELECT mq.ack(1, true);
-COMMIT;
 
--- UNREGISTER
-BEGIN;
-SELECT mq.unregister_channel(1);
-COMMIT;
+-- CLOSE
+SELECT mq.close_channel(1);

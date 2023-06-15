@@ -11,7 +11,7 @@ def db_listen():
     with psycopg2.connect(dbname='pg_mq_poc', user='cfurano', host='localhost', port=5432, password='') as connection:
         with connection.cursor() as cur:
             cur.execute(
-                'SELECT mq.register_channel()')
+                "SELECT mq.open_channel('Default Queue')")
             channel_id = cur.fetchone()[0]
             try:
                 print(f"Listening to channel {channel_id}")
@@ -22,7 +22,7 @@ def db_listen():
                     handle_message(connection, cur)
             finally:
                 print(f'Closing channel {channel_id}')
-                cur.execute(f'SELECT mq.unregister_channel({channel_id});')
+                cur.execute(f'SELECT mq.close_channel({channel_id});')
                 connection.commit()
 
 
