@@ -42,7 +42,7 @@ CALL mq.create_queue('My Exchange', 'My Queue', '^data-\d+$');
 Messages are comprised of a routing key, a JSON payload, and headers. They can be published to an exchange.
 
 ```sql
-CALL mq.publish('My Exchange', 'my-key', '{ "hello": "world" }', 'foo=>bar');
+CALL mq.publish('My Exchange', 'My Key', '{ "hello": "world" }', 'foo=>bar');
 ```
 
 ### Consume a message
@@ -53,9 +53,20 @@ A consumer can listen to a queue. It will receive all messages in the queue if i
 CALL mq.open_channel('My Queue');
 ```
 
+Messages are delivered with NOTIFY in JSON format. They have a shape like so:
+
+```json
+{
+  "delivery_id": 1,
+  "routing_key": "My Key",
+  "payload": { "hello": "world" },
+  "headers": { "foo": "bar" }
+}
+```
+
 ### Acknowledge a message
 
-A consumer can acknowledge a message using the `delivery_id`. An acknowledged message is removed from the queue and discarded.
+A consumer can acknowledge a message using the `delivery_id`. An acknowledged message is removed from its queue and discarded.
 
 ```sql
 CALL mq.ack(delivery_id);
