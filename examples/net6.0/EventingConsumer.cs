@@ -21,14 +21,17 @@ public sealed class EventingConsumer : IDisposable
             return;
         }
 
-        listeningConnection = CreateListeningConnection(dataSource);
+        listeningConnection = dataSource.OpenConnection();
         using var transaction = listeningConnection.BeginTransaction();
 
         listeningConnection.Notification += (sender, args) =>
         {
-            var message = JsonSerializer.Deserialize<Message>(args.Payload);
-            if (message is null) return;
-            Task.Run(() => OnMessageReceived?.Invoke(message, () => Ack(message.DeliveryId)));
+            if (string.IsNullOrEmpty(args.Payload)) return;
+            Task.Run(() => {
+                var message = JsonSerializer.Deserialize<Message>(args.Payload);
+                if (message is null) return;
+                OnMessageReceived?.Invoke(message, () => Ack(message.DeliveryId));
+            });
         };
 
         using var openChannelCommand = new NpgsqlCommand("mq.open_channel", listeningConnection, transaction)
@@ -63,12 +66,6 @@ public sealed class EventingConsumer : IDisposable
         closeChannelCommand.ExecuteNonQuery();
         listeningConnection?.Dispose();
         listeningConnection = null;
-    }
-
-    private NpgsqlConnection CreateListeningConnection(NpgsqlDataSource dataSource)
-    {
-        var listeningConnection = dataSource.OpenConnection();
-        return listeningConnection;
     }
 
     public delegate void MessageHandler(Message m, Action ack);

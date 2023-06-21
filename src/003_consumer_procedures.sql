@@ -37,29 +37,54 @@ BEGIN
     RETURN;
   END IF;
   EXECUTE format('UNLISTEN "%s"', current_channel_id);
-  INSERT INTO mq.message_waiting (SELECT message_id, queue_id FROM mq.delivery WHERE channel_id = current_channel_id);
+  INSERT INTO mq.message_waiting 
+    (SELECT message_id, queue_id FROM mq.delivery WHERE channel_id = current_channel_id)
+    ON CONFLICT DO NOTHING;
   DELETE FROM mq.channel c WHERE c.channel_id = current_channel_id;
 END;
 $$;
 
 
 /* ACK */ 
-CREATE OR REPLACE PROCEDURE mq.ack (delivery_id BIGINT, success BOOLEAN DEFAULT true) 
+CREATE OR REPLACE PROCEDURE mq.ack (delivery_id bigint) 
 LANGUAGE plpgsql
 AS $$
 DECLARE
   delivery RECORD;
 BEGIN
   SELECT * INTO delivery  
-    FROM mq.delivery md WHERE md.delivery_id = ack.delivery_id;
+    FROM mq.delivery d WHERE d.delivery_id = ack.delivery_id;
   IF delivery IS NULL THEN
     RAISE WARNING 'No such delivery';
     RETURN;
   END IF;
   DELETE FROM mq.message m WHERE m.message_id = delivery.message_id;
-  INSERT INTO mq.channel_waiting(channel_id, slot, queue_id) VALUES (delivery.channel_id, delivery.slot, delivery.queue_id);
+  INSERT INTO mq.channel_waiting(channel_id, slot, queue_id) 
+    VALUES (delivery.channel_id, delivery.slot, delivery.queue_id)
+    ON CONFLICT DO NOTHING;
 END;
 $$;
 
 
-/* TODO: NACK with future retry */
+/* NACK */
+CREATE OR REPLACE PROCEDURE mq.nack(delivery_id bigint, retry_after interval DEFAULT '0s'::interval) 
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  delivery RECORD;
+BEGIN
+  SELECT * INTO delivery  
+    FROM mq.delivery d WHERE d.delivery_id = nack.delivery_id;
+  IF delivery IS NULL THEN
+    RAISE WARNING 'No such delivery';
+    RETURN;
+  END IF;
+  DELETE FROM mq.delivery d WHERE d.delivery_id = nack.delivery_id;
+  INSERT INTO mq.message_waiting(message_id, queue_id, not_until_time)
+    VALUES (delivery.message_id, delivery.queue_id, now() + nack.retry_after)
+    ON CONFLICT DO NOTHING;
+  INSERT INTO mq.channel_waiting(channel_id, slot, queue_id) 
+    VALUES (delivery.channel_id, delivery.slot, delivery.queue_id)
+    ON CONFLICT DO NOTHING;
+END;
+$$;

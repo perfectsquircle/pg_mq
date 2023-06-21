@@ -72,6 +72,19 @@ A consumer can acknowledge a message using the `delivery_id`. An acknowledged me
 CALL mq.ack(delivery_id);
 ```
 
+A negative acknowledgement will put the message back in the queue.
+
+```sql
+CALL mq.nack(delivery_id);
+```
+
+An optional delay can be added to a negative acknowledgement. The message won't be delivered again until after the interval.
+
+```sql
+CALL mq.nack(delivery_id, '5 minutes');
+```
+
+
 ## Installation
 
 1. Create a database
