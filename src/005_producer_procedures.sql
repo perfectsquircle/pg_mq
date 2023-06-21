@@ -1,5 +1,5 @@
 /* PUBLISH */ 
-CREATE OR REPLACE PROCEDURE mq.publish (exchange_name text, routing_key text, payload json, headers hstore) 
+CREATE PROCEDURE mq.publish (exchange_name text, routing_key text, payload json, headers hstore) 
 LANGUAGE plpgsql 
 AS $$
 DECLARE 

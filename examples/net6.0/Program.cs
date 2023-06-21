@@ -11,6 +11,7 @@ Console.CancelKeyPress += (sender, args) =>
     args.Cancel = true;
     keepRunning = false;
 };
+AppDomain.CurrentDomain.ProcessExit += (sender, args) => { keepRunning = false; };
 
 try
 {
@@ -21,6 +22,7 @@ try
 }
 finally
 {
+    Thread.Sleep(250);
     consumer.CloseChannel();
 }
 

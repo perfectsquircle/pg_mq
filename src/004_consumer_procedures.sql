@@ -1,6 +1,6 @@
 /* REGISTER */
 
-CREATE OR REPLACE PROCEDURE mq.open_channel(queue_name text, maximum_messages int DEFAULT 3) 
+CREATE PROCEDURE mq.open_channel(queue_name text, maximum_messages int DEFAULT 3) 
 LANGUAGE plpgsql
 AS $$
 DECLARE 
@@ -24,7 +24,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE mq.close_channel() 
+CREATE PROCEDURE mq.close_channel() 
 LANGUAGE plpgsql 
 AS $$
 DECLARE 
@@ -46,7 +46,7 @@ $$;
 
 
 /* ACK */ 
-CREATE OR REPLACE PROCEDURE mq.ack (delivery_id bigint) 
+CREATE PROCEDURE mq.ack (delivery_id bigint) 
 LANGUAGE plpgsql
 AS $$
 DECLARE
@@ -67,7 +67,7 @@ $$;
 
 
 /* NACK */
-CREATE OR REPLACE PROCEDURE mq.nack(delivery_id bigint, retry_after interval DEFAULT '0s'::interval) 
+CREATE PROCEDURE mq.nack(delivery_id bigint, retry_after interval DEFAULT '0s'::interval) 
 LANGUAGE plpgsql
 AS $$
 DECLARE
