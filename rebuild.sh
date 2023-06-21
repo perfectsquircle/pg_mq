@@ -1,9 +1,13 @@
 #!/bin/bash -e
 set -e
 
-# psql -c "drop database if exists pg_mq_poc;"
-# psql -c "create database pg_mq_poc;"
+DATABASE_NAME=pg_mq_poc
+
+# psql -c "drop database if exists $DATABASE_NAME;"
+# psql -c "create database $DATABASE_NAME;"
+# psql -c "CREATE EXTENSION IF NOT EXISTS hstore;"
+psql -d $DATABASE_NAME -c "drop schema if exists mq cascade;"
 
 for f in ./src/*.sql; do
-    psql -f "$f" -d pg_mq_poc --single-transaction
+    psql -f "$f" -d $DATABASE_NAME --single-transaction
 done

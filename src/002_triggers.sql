@@ -1,93 +1,21 @@
-create extension if not exists hstore;
-
-drop schema if exists mq cascade;
-create schema mq;
-
--- TABLES 
-
-create table mq.exchange (
-    exchange_id serial primary key,
-    exchange_name text not null unique
-);
-
-create table mq.message_intake (
-    exchange_id int not null references mq.exchange(exchange_id) on delete cascade,
-    routing_key text not null,
-    payload json not null,
-    headers hstore not null default '',
-    publish_time timestamptz not null default now()
-);
-
-create table mq.queue (
-    queue_id bigserial primary key,
-    exchange_id int not null references mq.exchange(exchange_id),
-    queue_name text not null unique,
-    routing_key_pattern text not null default '^.*$'
-);
-
-create table mq.message (
-    message_id bigserial primary key,
-    like mq.message_intake,
-    queue_id bigint not null references mq.queue(queue_id) on delete cascade
-);
-create index on mq.message(queue_id);
-
-create table mq.message_waiting (
-    message_id bigint primary key references mq.message(message_id) on delete cascade,
-    queue_id bigint not null references mq.queue(queue_id) on delete cascade,
-    since_time timestamptz not null default now(),
-    not_until_time timestamptz null
-);
-
-create table mq.channel (
-    channel_id bigserial primary key,
-    channel_name text not null unique,
-    queue_id bigint not null references mq.queue(queue_id) on delete cascade,
-    maximum_messages int not null default 3
-);
-
-create table mq.channel_waiting (
-    channel_id bigint not null references mq.channel(channel_id) on delete cascade,
-    slot int not null,
-    queue_id bigint not null references mq.queue(queue_id) on delete cascade,
-    since_time timestamptz not null default now(),
-    primary key(channel_id, slot)
-);
-
-create table mq.delivery (
-    delivery_id bigserial primary key,
-    message_id bigint not null references mq.message(message_id) on delete cascade,
-    channel_id bigint not null references mq.channel(channel_id) on delete cascade,
-    slot int not null,
-    queue_id bigint not null references mq.queue(queue_id) on delete cascade,
-    delivery_time timestamptz not null default now()
-);
-
-/*
-create table mq.message_complete (
-    like mq.message,
-    complete_time timestamptz not null default now(),
-    success bool not null
-);
-*/
 
 -- FUNCTIONS
 
-CREATE OR REPLACE FUNCTION mq.notify_channel(delivery_id bigint, message_id bigint, channel_name text)
+CREATE FUNCTION mq.notify_channel(delivery_id bigint, message_id bigint, channel_name text)
 RETURNS VOID AS $$
 DECLARE
   payload TEXT;
 BEGIN
-  select row_to_json(md) into payload 
-    from (select delivery_id, m.routing_key, m.payload, m.headers
-      from mq.message m
-      where m.message_id = notify_channel.message_id) md;
+  SELECT row_to_json(md) INTO payload 
+    FROM (SELECT delivery_id, m.routing_key, m.payload, m.headers
+      FROM mq.message m
+      WHERE m.message_id = notify_channel.message_id) md;
   PERFORM pg_notify(channel_name, payload);
   RAISE NOTICE 'Sent message % to channel %', notify_channel.message_id, channel_name;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION mq.take_waiting_message(queue_id bigint)
+CREATE FUNCTION mq.take_waiting_message(queue_id bigint)
 RETURNS bigint AS $$
   DELETE FROM mq.message_waiting mw
   WHERE mw.message_id = (
@@ -100,7 +28,7 @@ RETURNS bigint AS $$
   ) RETURNING mw.message_id;
 $$ LANGUAGE SQL;
 
-CREATE OR REPLACE FUNCTION mq.take_waiting_channel(queue_id bigint)
+CREATE FUNCTION mq.take_waiting_channel(queue_id bigint)
 RETURNS SETOF mq.channel_waiting AS $$
   WITH row_to_delete AS (
     SELECT * FROM mq.channel_waiting c
@@ -119,7 +47,7 @@ $$ LANGUAGE SQL;
 
 -- INSERT MESSAGE
 
-CREATE OR REPLACE FUNCTION mq.insert_message()
+CREATE FUNCTION mq.insert_message()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO mq.message(exchange_id, routing_key, payload, headers, publish_time, queue_id)
@@ -138,7 +66,7 @@ BEFORE INSERT ON mq.message_intake
 
 -- INSERT MESSAGE WAITING
 
-CREATE OR REPLACE FUNCTION mq.insert_message_waiting()
+CREATE FUNCTION mq.insert_message_waiting()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO mq.message_waiting(message_id, queue_id)
@@ -154,7 +82,7 @@ AFTER INSERT ON mq.message
 
 -- DELIVER MESSAGE
 
-CREATE OR REPLACE FUNCTION mq.deliver_message()
+CREATE FUNCTION mq.deliver_message()
 RETURNS TRIGGER AS $$
 BEGIN
   EXECUTE mq.notify_channel(NEW.delivery_id, NEW.message_id, text(NEW.channel_id));
@@ -168,7 +96,7 @@ AFTER INSERT ON mq.delivery
 
 -- CHANNEL INITIALIZE
    
-CREATE OR REPLACE FUNCTION mq.channel_initialize()
+CREATE FUNCTION mq.channel_initialize()
 RETURNS TRIGGER AS $$
 BEGIN
   FOR i IN 1..NEW.maximum_messages LOOP
@@ -187,7 +115,7 @@ AFTER INSERT ON mq.channel
 
 -- MATCH MESSAGE
 
-CREATE OR REPLACE FUNCTION mq.match_message()
+CREATE FUNCTION mq.match_message()
 RETURNS TRIGGER AS $$
 DECLARE
   selected_message_id bigint;
@@ -206,7 +134,7 @@ CREATE TRIGGER match_message_before_insert
 BEFORE INSERT ON mq.channel_waiting
   FOR EACH ROW EXECUTE PROCEDURE mq.match_message();
 
-CREATE OR REPLACE FUNCTION mq.match_channel()
+CREATE FUNCTION mq.match_channel()
 RETURNS TRIGGER AS $$
 DECLARE
   selected_channel record;

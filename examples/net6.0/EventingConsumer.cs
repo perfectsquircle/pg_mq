@@ -37,7 +37,10 @@ public sealed class EventingConsumer : IDisposable
         using var openChannelCommand = new NpgsqlCommand("mq.open_channel", listeningConnection, transaction)
         {
             CommandType = CommandType.StoredProcedure,
-            Parameters = { new() { Value = queueName } }
+            Parameters = { 
+                new() { Value = queueName },
+                new() { Value = 8 },
+            }
         };
         openChannelCommand.ExecuteNonQuery();
         transaction.Commit();
@@ -45,7 +48,7 @@ public sealed class EventingConsumer : IDisposable
 
     public void Wait()
     {
-        listeningConnection?.Wait();
+        listeningConnection?.Wait(3000);
     }
 
     public void Ack(long deliveryId)
@@ -58,14 +61,14 @@ public sealed class EventingConsumer : IDisposable
 
     public void CloseChannel()
     {
+        if (listeningConnection is null) return;
         Console.WriteLine($"Closing channel");
         using var closeChannelCommand = new NpgsqlCommand("mq.close_channel", listeningConnection)
         {
             CommandType = CommandType.StoredProcedure,
         };
         closeChannelCommand.ExecuteNonQuery();
-        listeningConnection?.Dispose();
-        listeningConnection = null;
+        listeningConnection.Close();
     }
 
     public delegate void MessageHandler(Message m, Action ack);
