@@ -35,7 +35,8 @@ create index on mq.message(queue_id);
 create table mq.message_waiting (
     message_id bigint primary key references mq.message(message_id) on delete cascade,
     queue_id bigint not null references mq.queue(queue_id) on delete cascade,
-    since_time timestamptz not null default now()
+    since_time timestamptz not null default now(),
+    not_until_time timestamptz null
 );
 
 create table mq.channel (
@@ -92,6 +93,7 @@ RETURNS bigint AS $$
   WHERE mw.message_id = (
     SELECT m.message_id FROM mq.message_waiting m
     WHERE m.queue_id = queue_id
+      AND (not_until_time IS NULL OR not_until_time <= now())
     ORDER BY m.message_id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -209,6 +211,9 @@ RETURNS TRIGGER AS $$
 DECLARE
   selected_channel record;
 BEGIN
+  IF NEW.not_until_time IS NOT NULL AND NEW.not_until_time > now() THEN
+    RETURN NEW;
+  END IF;
   SELECT * FROM mq.take_waiting_channel(NEW.queue_id) INTO selected_channel;
   IF selected_channel IS NULL THEN
     RETURN NEW;
