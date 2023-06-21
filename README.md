@@ -26,7 +26,7 @@
 Create a new exchange to publish messages to.
 
 ```sql
-CALL mq.create_exchange('My Exchange');
+CALL mq.create_exchange(exchange_name=>'My Exchange');
 ```
 
 ### Create a queue
@@ -34,7 +34,7 @@ CALL mq.create_exchange('My Exchange');
 Queues belong to an exchange. They must define a routing pattern to receive messages. The routing pattern is a regular expression which is executed against all incoming routing keys.
 
 ```sql
-CALL mq.create_queue('My Exchange', 'My Queue', '^data-\d+$');
+CALL mq.create_queue(exchange_name=>'My Exchange', queue_name=>'My Queue', routing_key_pattern=>'^data-\d+$');
 ```
 
 ### Publish a message
@@ -42,7 +42,7 @@ CALL mq.create_queue('My Exchange', 'My Queue', '^data-\d+$');
 Messages are comprised of a routing key, a JSON payload, and headers. They can be published to an exchange.
 
 ```sql
-CALL mq.publish('My Exchange', 'My Key', '{ "hello": "world" }', 'foo=>bar');
+CALL mq.publish(exchange_name=>'My Exchange', routing_key=>'My Key', payload=>'{ "hello": "world" }', headers=>'foo=>bar');
 ```
 
 ### Consume a message
@@ -50,7 +50,7 @@ CALL mq.publish('My Exchange', 'My Key', '{ "hello": "world" }', 'foo=>bar');
 A consumer can listen to a queue. It will receive all messages in the queue if it's the sole consumer. It will receive some fraction of messages in the queue if there are multiple consumers.
 
 ```sql
-CALL mq.open_channel('My Queue');
+CALL mq.open_channel(queue_name=>'My Queue');
 ```
 
 Messages are delivered with NOTIFY in JSON format. They have a shape like so:
@@ -81,7 +81,7 @@ CALL mq.nack(delivery_id);
 An optional delay can be added to a negative acknowledgement. The message won't be delivered again until after the interval.
 
 ```sql
-CALL mq.nack(delivery_id, '5 minutes');
+CALL mq.nack(delivery_id, retry_after=>'5 minutes');
 ```
 
 

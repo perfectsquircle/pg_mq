@@ -1,5 +1,6 @@
-CALL mq.create_exchange('Default Exchange');
-CALL mq.create_queue('Default Exchange', 'Default Queue', '^data-\d+$');
+CALL mq.create_exchange(exchange_name=>'Default Exchange');
+
+CALL mq.create_queue(exchange_name=>'Default Exchange', queue_name=>'Default Queue', routing_key_pattern=>'^data-\d+$');
 
 INSERT INTO mq.message_intake(exchange_id, routing_key, payload, headers, publish_time) 
 SELECT 

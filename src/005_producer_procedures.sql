@@ -10,7 +10,7 @@ BEGIN
     RAISE WARNING 'No such exchange.';
     RETURN;
   END IF;
-  INSERT INTO mq.message_intake (exchange_id, routing_key, payload)
-    VALUES (exchange_id, routing_key, payload);
+  INSERT INTO mq.message_intake (exchange_id, routing_key, payload, headers)
+    VALUES (exchange_id, routing_key, payload, headers);
 END;
 $$;
