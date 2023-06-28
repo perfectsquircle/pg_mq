@@ -7,7 +7,7 @@ DECLARE
   payload TEXT;
 BEGIN
   SELECT row_to_json(md) INTO payload 
-    FROM (SELECT delivery_id, m.routing_key, m.payload, m.headers
+    FROM (SELECT delivery_id, m.routing_key, m.body, m.headers
       FROM mq.message m
       WHERE m.message_id = notify_channel.message_id) md;
   PERFORM pg_notify(channel_name, payload);
@@ -50,8 +50,8 @@ $$ LANGUAGE SQL;
 CREATE FUNCTION mq.insert_message()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO mq.message(exchange_id, routing_key, payload, headers, publish_time, queue_id)
-    SELECT NEW.exchange_id, NEW.routing_key, NEW.payload, NEW.headers, NEW.publish_time, q.queue_id
+  INSERT INTO mq.message(exchange_id, routing_key, body, headers, publish_time, queue_id)
+    SELECT NEW.exchange_id, NEW.routing_key, NEW.body, NEW.headers, NEW.publish_time, q.queue_id
     FROM mq.queue q
     WHERE NEW.exchange_id = q.exchange_id AND 
       NEW.routing_key ~ q.routing_key_pattern

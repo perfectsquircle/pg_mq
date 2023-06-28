@@ -8,14 +8,14 @@ CREATE TABLE mq.exchange (
 CREATE TABLE mq.message_intake (
     exchange_id int NOT NULL REFERENCES mq.exchange(exchange_id) ON DELETE CASCADE,
     routing_key text NOT NULL,
-    payload json NOT NULL,
+    body json NOT NULL,
     headers hstore NOT NULL DEFAULT '',
     publish_time timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE mq.queue (
     queue_id bigserial PRIMARY KEY,
-    exchange_id int NOT NULL REFERENCES mq.exchange(exchange_id),
+    exchange_id int NOT NULL REFERENCES mq.exchange(exchange_id) ON DELETE CASCADE,
     queue_name text NOT NULL UNIQUE,
     routing_key_pattern text NOT NULL DEFAULT '^.*$'
 );
@@ -39,7 +39,7 @@ CREATE TABLE mq.channel (
     channel_id bigserial PRIMARY KEY,
     channel_name text NOT NULL UNIQUE,
     queue_id bigint NOT NULL REFERENCES mq.queue(queue_id) ON DELETE CASCADE,
-    maximum_messages int NOT NULL DEFAULT 3
+    maximum_messages int NOT NULL DEFAULT 1
 );
 
 CREATE TABLE mq.channel_waiting (

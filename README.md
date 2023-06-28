@@ -39,10 +39,10 @@ CALL mq.create_queue(exchange_name=>'My Exchange', queue_name=>'My Queue', routi
 
 ### Publish a message
 
-Messages are comprised of a routing key, a JSON payload, and headers. They can be published to an exchange.
+Messages are comprised of a routing key, a JSON body, and headers. They can be published to an exchange.
 
 ```sql
-CALL mq.publish(exchange_name=>'My Exchange', routing_key=>'My Key', payload=>'{ "hello": "world" }', headers=>'foo=>bar');
+CALL mq.publish(exchange_name=>'My Exchange', routing_key=>'My Key', body=>'{ "hello": "world" }', headers=>'foo=>bar');
 ```
 
 ### Consume a message
@@ -59,7 +59,7 @@ Messages are delivered with NOTIFY in JSON format. They have a shape like so:
 {
   "delivery_id": 1,
   "routing_key": "My Key",
-  "payload": { "hello": "world" },
+  "body": { "hello": "world" },
   "headers": { "foo": "bar" }
 }
 ```

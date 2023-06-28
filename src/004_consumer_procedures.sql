@@ -1,6 +1,6 @@
 /* REGISTER */
 
-CREATE PROCEDURE mq.open_channel(queue_name text, maximum_messages int DEFAULT 3) 
+CREATE PROCEDURE mq.open_channel(queue_name text, maximum_messages int DEFAULT 1) 
 LANGUAGE plpgsql
 AS $$
 DECLARE 
@@ -36,11 +36,31 @@ BEGIN
   IF current_channel_id IS NULL THEN
     RETURN;
   END IF;
-  EXECUTE format('UNLISTEN "%s"', current_channel_id);
+  EXECUTE mq.close_channel(current_channel_id);
+END;
+$$;
+
+CREATE PROCEDURE mq.close_channel(close_channel_id bigint) 
+LANGUAGE plpgsql 
+AS $$
+BEGIN
+  EXECUTE format('UNLISTEN "%s"', close_channel_id);
   INSERT INTO mq.message_waiting 
-    (SELECT message_id, queue_id FROM mq.delivery WHERE channel_id = current_channel_id)
+    (SELECT message_id, queue_id FROM mq.delivery WHERE channel_id = close_channel_id)
     ON CONFLICT DO NOTHING;
-  DELETE FROM mq.channel c WHERE c.channel_id = current_channel_id;
+  DELETE FROM mq.channel c WHERE c.channel_id = close_channel_id;
+END;
+$$;
+
+CREATE PROCEDURE mq.close_dead_channels()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  dead_channel record;
+BEGIN
+  FOR dead_channel IN (SELECT * FROM mq.channel c WHERE c.channel_name::int NOT IN (SELECT pid FROM pg_catalog.pg_stat_activity psa)) LOOP
+    CALL mq.close_channel(dead_channel.channel_id);
+  END LOOP;
 END;
 $$;
 

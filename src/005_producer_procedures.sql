@@ -1,5 +1,5 @@
 /* PUBLISH */ 
-CREATE PROCEDURE mq.publish (exchange_name text, routing_key text, payload json, headers hstore) 
+CREATE PROCEDURE mq.publish (exchange_name text, routing_key text, body json, headers hstore) 
 LANGUAGE plpgsql 
 AS $$
 DECLARE 
@@ -10,7 +10,7 @@ BEGIN
     RAISE WARNING 'No such exchange.';
     RETURN;
   END IF;
-  INSERT INTO mq.message_intake (exchange_id, routing_key, payload, headers)
-    VALUES (exchange_id, routing_key, payload, headers);
+  INSERT INTO mq.message_intake (exchange_id, routing_key, body, headers)
+    VALUES (exchange_id, routing_key, body, headers);
 END;
 $$;

@@ -9,8 +9,8 @@ public class Message
     public long DeliveryId { get; set; }
     [JsonPropertyName("routing_key")]
     public string RoutingKey { get; set; }
-    [JsonPropertyName("payload")]
-    public JsonNode Payload { get; set; }
+    [JsonPropertyName("body")]
+    public JsonNode Body { get; set; }
     [JsonPropertyName("headers")]
     public Dictionary<string, string> Headers { get; set; }
 }
