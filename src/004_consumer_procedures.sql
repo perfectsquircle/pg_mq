@@ -36,7 +36,7 @@ BEGIN
   IF current_channel_id IS NULL THEN
     RETURN;
   END IF;
-  EXECUTE mq.close_channel(current_channel_id);
+  CALL mq.close_channel(current_channel_id);
 END;
 $$;
 
