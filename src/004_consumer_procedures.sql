@@ -64,6 +64,43 @@ BEGIN
 END;
 $$;
 
+CREATE PROCEDURE mq.sweep_waiting_message (queue_name text) 
+LANGUAGE plpgsql 
+AS $$
+DECLARE 
+  queue_id bigint;
+  current_channel record;
+BEGIN
+  SELECT q.queue_id INTO queue_id FROM mq.queue q WHERE q.queue_name = sweep_waiting_message.queue_name;
+  IF queue_id IS NULL THEN
+    RAISE WARNING 'No such queue';
+    RETURN;
+  END IF;
+  CALL mq.sweep_waiting_message(queue_id);
+END;
+$$;
+
+CREATE PROCEDURE mq.sweep_waiting_message (queue_id bigint) 
+LANGUAGE plpgsql 
+AS $$
+DECLARE
+  selected_message_id bigint;
+  selected_channel record;
+BEGIN
+  SELECT mq.take_waiting_message(queue_id) INTO selected_message_id;
+  IF selected_message_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT * FROM mq.take_waiting_channel(queue_id) INTO selected_channel;
+  IF selected_channel IS NULL THEN
+    RETURN;
+  END IF;
+
+  INSERT INTO mq.delivery(message_id, channel_id, slot, queue_id)
+      VALUES (selected_message_id, selected_channel.channel_id, selected_channel.slot, queue_id);
+END;
+$$;
 
 /* ACK */ 
 CREATE PROCEDURE mq.ack (delivery_id bigint) 
