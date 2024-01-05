@@ -27,17 +27,18 @@ public sealed class EventingConsumer : IDisposable
         listeningConnection.Notification += (sender, args) =>
         {
             if (string.IsNullOrEmpty(args.Payload)) return;
-            Task.Run(() => {
+            Task.Run(() =>
+            {
                 var message = JsonSerializer.Deserialize<Message>(args.Payload);
                 if (message is null) return;
-                OnMessageReceived?.Invoke(message, () => Ack(message.DeliveryId));
+                OnMessageReceived?.Invoke(message, () => Ack(message.DeliveryId), (TimeSpan? retryAfter) => Nack(message.DeliveryId, retryAfter));
             });
         };
 
         using var openChannelCommand = new NpgsqlCommand("mq.open_channel", listeningConnection, transaction)
         {
             CommandType = CommandType.StoredProcedure,
-            Parameters = { 
+            Parameters = {
                 new() { Value = queueName },
                 new() { Value = 8 },
             }
@@ -59,6 +60,18 @@ public sealed class EventingConsumer : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    public void Nack(long deliveryId, TimeSpan? retryAfter = default)
+    {
+        using var cmd = dataSource.CreateCommand("mq.nack");
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.Parameters.Add(new NpgsqlParameter { Value = deliveryId });
+        if (retryAfter != default)
+        {
+            cmd.Parameters.Add(new NpgsqlParameter { Value = retryAfter });
+        }
+        cmd.ExecuteNonQuery();
+    }
+
     public void CloseChannel()
     {
         if (listeningConnection is null) return;
@@ -71,7 +84,15 @@ public sealed class EventingConsumer : IDisposable
         listeningConnection.Close();
     }
 
-    public delegate void MessageHandler(Message m, Action ack);
+    public void SweepWaitingMessage(string queueName)
+    {
+        using var cmd = dataSource.CreateCommand("mq.sweep_waiting_message");
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.Parameters.Add(new NpgsqlParameter { Value = queueName });
+        cmd.ExecuteNonQuery();
+    }
+
+    public delegate void MessageHandler(Message m, Action ack, Action<TimeSpan?> nack);
 
     public void Dispose()
     {
